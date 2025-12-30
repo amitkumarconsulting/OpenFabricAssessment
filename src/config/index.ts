@@ -5,6 +5,10 @@ export const redis = new Redis({
   port: Number(process.env.REDIS_PORT) || 6379,
 });
 
+export const QUEUE_NAME =
+  process.env.QUEUE_NAME || "transaction-queue";
+
+
 redis.on("connect", () => {
   console.log("✅ Redis connected");
 });
