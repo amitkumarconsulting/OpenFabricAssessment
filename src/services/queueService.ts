@@ -1,5 +1,6 @@
 import { Queue } from "bullmq";
 import { redis } from "../config";
+import { PostingTransactionPayload } from "./postingService";
 
 const QUEUE_NAME = process.env.QUEUE_NAME || "transaction-queue";
 
@@ -16,15 +17,18 @@ export const transactionQueue = new Queue(QUEUE_NAME, {
   },
 });
 
-export async function enqueueTransaction(transactionId: string) {
+export async function enqueueTransaction(
+    transaction: PostingTransactionPayload
+  ) {
     await transactionQueue.add(
       "process-transaction",
-      { transactionId },
+      { transaction },
       {
-        jobId: transactionId, // 🔑 Deduplication
+        jobId: transaction.id,
       }
     );
   }
+  
 
   export async function getQueueMetrics() {
     const counts = await transactionQueue.getJobCounts();
