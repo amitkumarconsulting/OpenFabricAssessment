@@ -1,91 +1,87 @@
-import { redis } from "../config";
-import { TransactionState, TransactionStatus } from "../models/transaction";
+import { Redis } from 'ioredis';
+import { config } from '../config';
+import { TransactionStatus, TransactionState } from '../models/transaction';
 
-const TXN_TTL_SECONDS = 60 * 60 * 24; // 24 hours
+const STATE_TTL = 24 * 60 * 60; // 24 hours in seconds
 
 export class StateService {
-  private static key(id: string) {
-    return `txn:${id}`;
+  private redis: Redis;
+  private keyPrefix = 'transaction:state:';
+
+  constructor(redis: Redis) {
+    this.redis = redis;
   }
 
   /**
-   * Create a new transaction state.
-   * Used by API when transaction is first received.
+   * Get transaction state
    */
-  static async create(id: string): Promise<TransactionState | null> {
-    const key = this.key(id);
+  async getState(transactionId: string): Promise<TransactionState | null> {
+    const key = `${this.keyPrefix}${transactionId}`;
+    const data = await this.redis.get(key);
 
-    const exists = await redis.exists(key);
-    if (exists) {
-      return this.get(id);
+    if (!data) {
+      return null;
     }
 
+    return JSON.parse(data) as TransactionState;
+  }
+
+  /**
+   * Set transaction state
+   */
+  async setState(
+    transactionId: string,
+    status: TransactionStatus,
+    error?: string,
+    retryCount?: number
+  ): Promise<void> {
+    const key = `${this.keyPrefix}${transactionId}`;
     const now = new Date().toISOString();
 
+    // Get existing state to preserve createdAt
+    const existing = await this.getState(transactionId);
+
     const state: TransactionState = {
-      id,
-      status: "pending",
-      retryCount: 0,
-      submittedAt: now,
+      id: transactionId,
+      status,
+      createdAt: existing?.createdAt || now,
+      updatedAt: now,
+      ...(retryCount !== undefined && { retryCount }),
+      ...(error && { error }),
     };
 
-    await redis.set(key, JSON.stringify(state), "EX", TXN_TTL_SECONDS);
-    return state;
+    await this.redis.setex(key, STATE_TTL, JSON.stringify(state));
   }
 
   /**
-   * Fetch transaction state.
+   * Check if transaction is already processed (completed or failed)
    */
-  static async get(id: string): Promise<TransactionState | null> {
-    const raw = await redis.get(this.key(id));
-    return raw ? JSON.parse(raw) : null;
+  async isProcessed(transactionId: string): Promise<boolean> {
+    const state = await this.getState(transactionId);
+    return state?.status === TransactionStatus.COMPLETED || state?.status === TransactionStatus.FAILED;
   }
 
   /**
-   * Update transaction status.
+   * Delete transaction state (useful for cleanup)
    */
-  static async updateStatus(
-    id: string,
-    status: TransactionStatus,
-    error?: string
-  ): Promise<void> {
-    const state = await this.get(id);
-    if (!state) return;
+  async deleteState(transactionId: string): Promise<void> {
+    const key = `${this.keyPrefix}${transactionId}`;
+    await this.redis.del(key);
+  }
 
-    state.status = status;
-
-    if (status === "completed") {
-      state.completedAt = new Date().toISOString();
+  /**
+   * Get all transaction states (for health/metrics)
+   */
+  async getAllStates(): Promise<TransactionState[]> {
+    const keys = await this.redis.keys(`${this.keyPrefix}*`);
+    
+    if (keys.length === 0) {
+      return [];
     }
 
-    if (error) {
-      state.error = error;
-    }
-
-    await redis.set(
-      this.key(id),
-      JSON.stringify(state),
-      "EX",
-      TXN_TTL_SECONDS
-    );
-  }
-
-  /**
-   * Increment retry count.
-   */
-  static async incrementRetry(id: string): Promise<number> {
-    const state = await this.get(id);
-    if (!state) return 0;
-
-    state.retryCount += 1;
-
-    await redis.set(
-      this.key(id),
-      JSON.stringify(state),
-      "EX",
-      TXN_TTL_SECONDS
-    );
-
-    return state.retryCount;
+    const values = await this.redis.mget(...keys);
+    return values
+      .filter((v): v is string => v !== null)
+      .map((v) => JSON.parse(v) as TransactionState);
   }
 }
