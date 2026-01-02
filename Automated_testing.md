@@ -70,6 +70,9 @@ npm run test:coverage
 # Run load tests (target: 1000+ TPS)
 npm run load-test
 
+# Run tests with coverage
+npm run test:coverage
+
 #This will send 1000 transactions per second for 10 seconds and report metrics.
 
 # With custom configuration
