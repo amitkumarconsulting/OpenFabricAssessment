@@ -6,6 +6,15 @@
 2. Ensure Node.js 18+ is installed
 3. Have terminal access ready
 
+
+## Step 0: Start Infrastructure
+```bash
+# To Run testing via script
+chmod +x test-manual.sh
+./test-manual.sh
+
+```
+
 ## Step 1: Start Infrastructure
 
 ```bash
